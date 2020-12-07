@@ -48,11 +48,6 @@ void copy_matrix(float* from, float* to, size_t rows, size_t cols) {
     }
 }
 
-typedef enum {
-    EROISON,
-    DILATION
-} filter_type;
-
 typedef struct {
     int thread_num;
     int th_count;
@@ -61,10 +56,10 @@ typedef struct {
     int cols;
     int w_dim;
 
-    float* matrix;
-    float* result;
-
-    filter_type filter;
+    float* matrix1;
+    float* result1;
+    float* matrix2;
+    float* result2;
 } thread_arg;
 
 // Функция, которая будет выполняться в потоках
@@ -73,43 +68,49 @@ void* edit_line(void* argument) {
     thread_arg* args = (thread_arg*)argument;
     const int thread_num = args->thread_num;
     const int th_count = args->th_count;
+
     const int rows = args->rows;
     const int cols = args->cols;
     int offset = args->w_dim / 2;
-    const float* matrix = args->matrix;
-    const filter_type filter = args->filter;
-    float* result = args->result;
+
+    const float* matrix1 = args->matrix1;
+    const float* matrix2 = args->matrix2;
+    float* result1 = args->result1;
+    float* result2 = args->result2;
     // Либо 2 одновременно либо 2 ф-ии
 
-    //printf("\n=== IN THREAD %d - %d ===\n", thread_num, filter);
-    //printf("offset = %d\n", offset);
+    //printf("\n=== IN THREAD %d ===\n", thread_num);
+    // printf("offset = %d\n", offset);
 
     for (int th_row = thread_num; th_row < rows; th_row += th_count) {
-        //printf("th_row = %d\n", th_row);
+        //printf("THREAD %d ROW  %d\n", thread_num, th_row);
         for (int th_col = 0; th_col < cols; ++th_col) {
             //printf(" th_col = %d\n", th_col);
-            float to_put = matrix[th_row*cols + th_col];
+            float max = matrix1[th_row*cols + th_col];
+            float min = matrix2[th_row*cols + th_col];
             
             for (int i = th_row - offset; i < th_row + offset + 1; ++i) {
                 for (int j = th_col - offset; j < th_col + offset + 1; ++j) {
-                    float curr;
+                    float curr1, curr2;
                     if ((i < 0) || (i >= rows) || (j < 0) || (j >= cols)) {
-                        curr = 0;
+                        curr1 = 0;
+                        curr2 = 0;
                     } else {
-                        curr = matrix[i*cols + j];
+                        curr1 = matrix1[i*cols + j];
+                        curr2 = matrix2[i*cols + j];
                     }
-                    //printf("[%d][%d] = %f ", i, j, curr);
-                    if ((filter == EROISON) && (curr < to_put)) {
-                        to_put = curr;
-                    } 
-                    if ((filter == DILATION) && (curr > to_put)) {
-                        to_put = curr;
+                    //printf("[%d][%d] = %f ", i, j, curr1);
+                    if (curr1 > max) {
+                        max = curr1;
+                    }
+                    if (curr2 < min) {
+                        min = curr2;
                     }
                 }
                 //printf("\n");
             }
-            //printf("to_put = %f\n", to_put);
-            result[th_row*cols + th_col] = to_put;
+            result1[th_row*cols + th_col] = max;
+            result2[th_row*cols + th_col] = min;
         }
         //printf("\n");
     }
@@ -130,47 +131,42 @@ void put_filters(float* matrix, size_t rows, size_t cols, size_t w_dim, float* r
     copy_matrix(matrix, tmp1, rows, cols);
     copy_matrix(matrix, tmp2, rows, cols);
 
-    pthread_t eroison_ids[th_count];
-    pthread_t dilation_ids[th_count];
-    thread_arg eroison_args[th_count];
-    thread_arg dilation_args[th_count];
+    pthread_t ids[th_count];
+    thread_arg args[th_count];
 
     for (int k = 0; k < filter_cnt; ++k) {
         for (int i = 0; i < th_count; ++i) {
-            eroison_args[i].thread_num = i;
-            eroison_args[i].th_count = th_count;
-            eroison_args[i].rows = rows;
-            eroison_args[i].cols = cols;
-            eroison_args[i].w_dim = w_dim;
-            eroison_args[i].matrix = tmp1;
-            eroison_args[i].result = res1;
-            eroison_args[i].filter = EROISON;
-            if (pthread_create(&eroison_ids[i], NULL, edit_line, &eroison_args[i]) != 0) {
-                perror("Can't create a thread.\n");
-            }
+            args[i].thread_num = i;
+            args[i].th_count = th_count;
+            args[i].rows = rows;
+            args[i].cols = cols;
+            args[i].w_dim = w_dim;
+            args[i].matrix1 = tmp1;
+            args[i].result1 = res1;
+            args[i].matrix2 = tmp2;
+            args[i].result2 = res2;
 
-            dilation_args[i].thread_num = i;
-            dilation_args[i].th_count = th_count;
-            dilation_args[i].rows = rows;
-            dilation_args[i].cols = cols;
-            dilation_args[i].w_dim = w_dim;
-            dilation_args[i].matrix = tmp2;
-            dilation_args[i].result = res2;
-            dilation_args[i].filter = DILATION;
-            if (pthread_create(&dilation_ids[i], NULL, edit_line, &dilation_args[i]) != 0) {
+            if (pthread_create(&ids[i], NULL, edit_line, &args[i]) != 0) {
                 perror("Can't create a thread.\n");
             }
         }
 
         for(int i = 0; i < th_count; ++i) {
-            if ((pthread_join(eroison_ids[i], NULL) != 0) || (pthread_join(dilation_ids[i], NULL) != 0)) {
+            if (pthread_join(ids[i], NULL) != 0) {
                 perror("Can't wait for thread\n");
             }
         }
         
-        if (filter_cnt != 1) {
-            copy_matrix(res1, tmp1, rows, cols);
-            copy_matrix(res2, tmp2, rows, cols);
+        if (filter_cnt > 1) {
+            float* swap = res1;
+            res1 = tmp1;
+            tmp1 = swap;
+
+            swap = res2;
+            res2 = tmp2;
+            tmp2 = swap;
+            // copy_matrix(res1, tmp1, rows, cols);
+            // copy_matrix(res2, tmp2, rows, cols);
         }
     }
 
@@ -179,6 +175,9 @@ void put_filters(float* matrix, size_t rows, size_t cols, size_t w_dim, float* r
 }
 
 int main(int argc, char* argv[]) {
+    int pid = getpid();
+    printf("PID <%d>\n", pid);
+    
     int threads = 1;
     if (argc == 3) {
         threads = atoi(argv[2]);
@@ -216,7 +215,9 @@ int main(int argc, char* argv[]) {
 
     struct timeval start, end;
     gettimeofday(&start, NULL);
+
     put_filters(matrix, rows, cols, w_dim, res1, res2, k, threads);
+    
     gettimeofday(&end, NULL);
 
     long sec = end.tv_sec - start.tv_sec;
@@ -228,9 +229,9 @@ int main(int argc, char* argv[]) {
     long elapsed = sec*1000000 + microsec;
     
 
-    printf("EROISON:\n");
-    print_matrix(res1, rows, cols);
     printf("DILATION:\n");
+    print_matrix(res1, rows, cols);
+    printf("EROISON:\n");
     print_matrix(res2, rows, cols);
     printf("TOTAL TIME: %ld ms\n", elapsed);
 

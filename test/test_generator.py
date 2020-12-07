@@ -25,10 +25,11 @@ def main():
 
     output_filename = "big_test.t"
     with open( output_filename, 'w') as foutput :
+        foutput.write("{} {}\n".format(rows, cols))
         for _ in range( 0, rows ) :
             for _ in range( 0, cols ) :
                 value = generate_random_value()
-                foutput.write("{}".format(value))
+                foutput.write("{} ".format(value))
             foutput.write("\n")
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -pedantic -Wall -std=c11 -g
+CFLAGS = -pedantic -Wall -std=c11 -O2
 LDFLAGS = -lpthread
 EXECUTABLE = lab3
 SRC=main.c

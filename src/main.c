@@ -56,10 +56,10 @@ typedef struct {
     int cols;
     int w_dim;
 
-    float* matrix1;
-    float* result1;
-    float* matrix2;
-    float* result2;
+    float** matrix1;
+    float** result1;
+    float** matrix2;
+    float** result2;
 } thread_arg;
 
 // Функция, которая будет выполняться в потоках
@@ -73,10 +73,15 @@ void* edit_line(void* argument) {
     const int cols = args->cols;
     int offset = args->w_dim / 2;
 
-    const float* matrix1 = args->matrix1;
-    const float* matrix2 = args->matrix2;
-    float* result1 = args->result1;
-    float* result2 = args->result2;
+    float** matrix1_ptr = args->matrix1;
+    float** matrix2_ptr = args->matrix2;
+    float** result1_ptr = args->result1;
+    float** result2_ptr = args->result2;
+
+    const float* matrix1 = *matrix1_ptr;
+    const float* matrix2 = *matrix2_ptr;
+    float* result1 = *result1_ptr;
+    float* result2 = *result2_ptr;
     // Либо 2 одновременно либо 2 ф-ии
 
     //printf("\n=== IN THREAD %d ===\n", thread_num);
@@ -85,7 +90,7 @@ void* edit_line(void* argument) {
     for (int th_row = thread_num; th_row < rows; th_row += th_count) {
         //printf("THREAD %d ROW  %d\n", thread_num, th_row);
         for (int th_col = 0; th_col < cols; ++th_col) {
-            //printf(" th_col = %d\n", th_col);
+            // printf(" th_col = %d\n", th_col);
             float max = matrix1[th_row*cols + th_col];
             float min = matrix2[th_row*cols + th_col];
             
@@ -99,7 +104,7 @@ void* edit_line(void* argument) {
                         curr1 = matrix1[i*cols + j];
                         curr2 = matrix2[i*cols + j];
                     }
-                    //printf("[%d][%d] = %f ", i, j, curr1);
+                    // printf("[%d][%d] ", i, j);
                     if (curr1 > max) {
                         max = curr1;
                     }
@@ -107,8 +112,9 @@ void* edit_line(void* argument) {
                         min = curr2;
                     }
                 }
-                //printf("\n");
+                // printf("\n");
             }
+
             result1[th_row*cols + th_col] = max;
             result2[th_row*cols + th_col] = min;
         }
@@ -117,19 +123,21 @@ void* edit_line(void* argument) {
     pthread_exit(NULL); // Заканчиваем поток
 }
 
-void put_filters(float* matrix, size_t rows, size_t cols, size_t w_dim, float* res1, float* res2, int filter_cnt, int th_count) {
+void put_filters(float** matrix_ptr, size_t rows, size_t cols, size_t w_dim, float** res1_ptr, float** res2_ptr, int filter_cnt, int th_count) {
     float* tmp1 = (float*)malloc(rows * cols * sizeof(float));
     if (!tmp1) {
         perror("Error while allocating matrix\n");
         exit(1);
     }
+    float** matrix1_ptr = &tmp1;
     float* tmp2 = (float*)malloc(rows * cols * sizeof(float));
     if (!tmp2) {
         perror("Error while allocating matrix\n");
         exit(1);
     }
-    copy_matrix(matrix, tmp1, rows, cols);
-    copy_matrix(matrix, tmp2, rows, cols);
+    float** matrix2_ptr = &tmp2;
+    copy_matrix(*matrix_ptr, tmp1, rows, cols);
+    copy_matrix(*matrix_ptr, tmp2, rows, cols);
 
     pthread_t ids[th_count];
     thread_arg args[th_count];
@@ -141,10 +149,10 @@ void put_filters(float* matrix, size_t rows, size_t cols, size_t w_dim, float* r
             args[i].rows = rows;
             args[i].cols = cols;
             args[i].w_dim = w_dim;
-            args[i].matrix1 = tmp1;
-            args[i].result1 = res1;
-            args[i].matrix2 = tmp2;
-            args[i].result2 = res2;
+            args[i].matrix1 = matrix1_ptr;
+            args[i].result1 = res1_ptr;
+            args[i].matrix2 = matrix2_ptr;
+            args[i].result2 = res2_ptr;
 
             if (pthread_create(&ids[i], NULL, edit_line, &args[i]) != 0) {
                 perror("Can't create a thread.\n");
@@ -158,15 +166,13 @@ void put_filters(float* matrix, size_t rows, size_t cols, size_t w_dim, float* r
         }
         
         if (filter_cnt > 1) {
-            float* swap = res1;
-            res1 = tmp1;
-            tmp1 = swap;
+            float** swap = res1_ptr;
+            res1_ptr = matrix1_ptr;
+            matrix1_ptr = swap;
 
-            swap = res2;
-            res2 = tmp2;
-            tmp2 = swap;
-            // copy_matrix(res1, tmp1, rows, cols);
-            // copy_matrix(res2, tmp2, rows, cols);
+            swap = res2_ptr;
+            res2_ptr = matrix2_ptr;
+            matrix2_ptr = swap;
         }
     }
 
@@ -216,8 +222,8 @@ int main(int argc, char* argv[]) {
     struct timeval start, end;
     gettimeofday(&start, NULL);
 
-    put_filters(matrix, rows, cols, w_dim, res1, res2, k, threads);
-    
+    put_filters(&matrix, rows, cols, w_dim, &res1, &res2, k, threads);
+
     gettimeofday(&end, NULL);
 
     long sec = end.tv_sec - start.tv_sec;
